@@ -1,29 +1,42 @@
 package com.example.falldetectapp
 
-object SensorBuffer {
+class SensorBuffer(private val windowSize: Int) {
 
-    private const val WINDOW_SIZE = 100
-    private const val AXES = 3
+    private val accelData = ArrayList<FloatArray>()
+    private val gyroData = ArrayList<FloatArray>()
 
-    private val buffer = ArrayDeque<FloatArray>()
+    fun addAccelerometer(values: FloatArray) {
+        if (accelData.size >= windowSize) accelData.removeAt(0)
+        accelData.add(values)
+    }
 
-    /**
-     * Adds a new accelerometer sample.
-     * Returns a [100][3] window when ready, else null.
-     */
-    fun add(values: FloatArray): Array<FloatArray>? {
-        buffer.addLast(values.copyOf())
+    fun addGyroscope(values: FloatArray) {
+        if (gyroData.size >= windowSize) gyroData.removeAt(0)
+        gyroData.add(values)
+    }
 
-        if (buffer.size < WINDOW_SIZE) return null
+    fun isFull(): Boolean {
+        return accelData.size == windowSize && gyroData.size == windowSize
+    }
 
-        if (buffer.size > WINDOW_SIZE) {
-            buffer.removeFirst()
+    fun getFlattenedWindow(): FloatArray {
+        val result = FloatArray(windowSize * 6)
+        for (i in 0 until windowSize) {
+            val acc = accelData[i]
+            val gyro = gyroData[i]
+
+            result[i * 6 + 0] = acc[0]
+            result[i * 6 + 1] = acc[1]
+            result[i * 6 + 2] = acc[2]
+            result[i * 6 + 3] = gyro[0]
+            result[i * 6 + 4] = gyro[1]
+            result[i * 6 + 5] = gyro[2]
         }
-
-        return buffer.toTypedArray()
+        return result
     }
 
     fun clear() {
-        buffer.clear()
+        accelData.clear()
+        gyroData.clear()
     }
 }
