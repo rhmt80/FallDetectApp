@@ -113,6 +113,13 @@
                     android:text="Stop"
                     android:layout_marginStart="12dp" />
             </LinearLayout>
+
+            <Button
+                android:id="@+id/btnTestAlert"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Send Test Alert"
+                android:layout_marginTop="12dp" />
         </LinearLayout>
 
         <!-- Pending fall alert banner -->

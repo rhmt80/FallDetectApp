@@ -59,12 +59,16 @@ class MainActivity : AppCompatActivity() {
         val alertBanner = findViewById<LinearLayout>(R.id.alertBanner)
         val alertCountdownText = findViewById<TextView>(R.id.alertCountdownText)
         val btnCancelAlert = findViewById<Button>(R.id.btnCancelAlert)
+        val btnTestAlert = findViewById<Button>(R.id.btnTestAlert)
 
         // Populate profile summary
         val userName = prefs.getString("user_name", "") ?: ""
         val caretakerName = prefs.getString("caretaker_name", "") ?: ""
         val caretakerPhone = prefs.getString("caretaker_phone", "") ?: ""
         profileSummary.text = "Monitoring for $userName\nCaretaker: $caretakerName ($caretakerPhone)"
+
+        // Refresh status notification to reflect current state
+        AppStatusNotifier.refreshStatus(this)
 
         startBtn.setOnClickListener {
 
@@ -108,6 +112,22 @@ class MainActivity : AppCompatActivity() {
             ContextCompat.startForegroundService(this, intent)
             statusText.text = "Service stopped"
             isMonitoring = false
+        }
+
+        btnTestAlert.setOnClickListener {
+            if (!hasAllMonitoringPermissions()) {
+                Toast.makeText(
+                    this,
+                    "Grant all permissions before sending a test alert.",
+                    Toast.LENGTH_LONG
+                ).show()
+                return@setOnClickListener
+            }
+
+            val intent = Intent(this, ForegroundSensorService::class.java).apply {
+                action = ForegroundSensorService.ACTION_TEST_ALERT
+            }
+            ContextCompat.startForegroundService(this, intent)
         }
 
         btnEditSetup.setOnClickListener {

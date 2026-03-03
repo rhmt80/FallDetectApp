@@ -18,6 +18,9 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
+import android.media.RingtoneManager
+import android.os.VibrationEffect
+import android.os.Vibrator
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import android.telephony.SmsManager
@@ -29,9 +32,10 @@ class ForegroundSensorService : Service(), SensorEventListener {
         const val ACTION_START = "ACTION_START"
         const val ACTION_STOP = "ACTION_STOP"
         const val ACTION_CANCEL_ALERT = "ACTION_CANCEL_ALERT"
+        const val ACTION_TEST_ALERT = "ACTION_TEST_ALERT"
         const val EXTRA_ADAPTIVE_MODE = "EXTRA_ADAPTIVE_MODE"
 
-        private const val CHANNEL_ID = "FallDetectionChannel"
+        private const val CHANNEL_ID = "FallDetectionChannelV2"
         private const val NOTIFICATION_ID = 1
 
         private const val WINDOW_SIZE = 100
@@ -100,6 +104,8 @@ class ForegroundSensorService : Service(), SensorEventListener {
             ACTION_STOP -> stopMonitoring()
 
             ACTION_CANCEL_ALERT -> cancelPendingAlert()
+
+            ACTION_TEST_ALERT -> onPossibleFallDetected(1.0f)
         }
 
         return START_STICKY
@@ -118,6 +124,8 @@ class ForegroundSensorService : Service(), SensorEventListener {
         metricsLogger.startSession(adaptiveMode)
 
         Log.d("MODE", if (adaptiveMode) "ADAPTIVE" else "CONSTANT")
+
+        AppStatusNotifier.setMonitoringActive(this, true)
     }
 
     private fun stopMonitoring() {
@@ -125,6 +133,8 @@ class ForegroundSensorService : Service(), SensorEventListener {
         metricsLogger.stopSession()
         stopForeground(true)
         stopSelf()
+
+        AppStatusNotifier.setMonitoringActive(this, false)
     }
 
     private fun registerSensors(rate: Int) {
@@ -184,6 +194,28 @@ class ForegroundSensorService : Service(), SensorEventListener {
         }
 
         alertPending = true
+
+        // Explicit buzz + beep when alert window starts
+        try {
+            val vibrator = getSystemService(VIBRATOR_SERVICE) as Vibrator
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(
+                    VibrationEffect.createOneShot(
+                        600,
+                        VibrationEffect.DEFAULT_AMPLITUDE
+                    )
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(600)
+            }
+
+            val notificationUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            val ringtone = RingtoneManager.getRingtone(applicationContext, notificationUri)
+            ringtone?.play()
+        } catch (e: Exception) {
+            Log.w("ALERT", "Failed to play alert sound/vibration", e)
+        }
 
         // Launch main activity so the user can cancel within 15 seconds
         val activityIntent = Intent(this, MainActivity::class.java).apply {
@@ -422,8 +454,11 @@ class ForegroundSensorService : Service(), SensorEventListener {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "Fall Detection",
-                NotificationManager.IMPORTANCE_LOW
-            )
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                enableVibration(true)
+                enableLights(true)
+            }
 
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
