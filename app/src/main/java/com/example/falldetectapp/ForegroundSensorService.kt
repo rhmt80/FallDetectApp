@@ -13,14 +13,16 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.location.Location
 import android.location.LocationManager
+import android.media.Ringtone
+import android.media.RingtoneManager
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.util.Log
-import android.media.RingtoneManager
 import android.os.VibrationEffect
 import android.os.Vibrator
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import android.telephony.SmsManager
@@ -63,6 +65,8 @@ class ForegroundSensorService : Service(), SensorEventListener {
     private val handler = Handler(Looper.getMainLooper())
     private var alertPending = false
     private var alertRunnable: Runnable? = null
+    private var currentAlertIsTest = false
+    private var alertRingtone: Ringtone? = null
 
     private var adaptiveMode = false
     private var currentSamplingRate = HIGH_RATE
@@ -105,7 +109,7 @@ class ForegroundSensorService : Service(), SensorEventListener {
 
             ACTION_CANCEL_ALERT -> cancelPendingAlert()
 
-            ACTION_TEST_ALERT -> onPossibleFallDetected(1.0f)
+            ACTION_TEST_ALERT -> onPossibleFallDetected(1.0f, true)
         }
 
         return START_STICKY
@@ -187,13 +191,14 @@ class ForegroundSensorService : Service(), SensorEventListener {
         }
     }
 
-    private fun onPossibleFallDetected(confidence: Float) {
+    private fun onPossibleFallDetected(confidence: Float, isTest: Boolean = false) {
         if (alertPending) {
             // Already counting down for an alert, avoid stacking
             return
         }
 
         alertPending = true
+        currentAlertIsTest = isTest
 
         // Explicit buzz + beep when alert window starts
         try {
@@ -210,9 +215,13 @@ class ForegroundSensorService : Service(), SensorEventListener {
                 vibrator.vibrate(600)
             }
 
-            val notificationUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            val ringtone = RingtoneManager.getRingtone(applicationContext, notificationUri)
-            ringtone?.play()
+            // Stop any previous alert sound if still playing
+            stopAlertSound()
+
+            // Use a louder, more urgent alarm-type sound instead of the normal notification tone
+            val notificationUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+            alertRingtone = RingtoneManager.getRingtone(applicationContext, notificationUri)
+            alertRingtone?.play()
         } catch (e: Exception) {
             Log.w("ALERT", "Failed to play alert sound/vibration", e)
         }
@@ -228,7 +237,8 @@ class ForegroundSensorService : Service(), SensorEventListener {
         showPendingAlertNotification()
 
         alertRunnable = Runnable {
-            sendAlertSms()
+            sendAlertSms(currentAlertIsTest)
+            stopAlertSound()
             alertPending = false
             // After sending, go back to normal monitoring notification
             startForegroundServiceInternal()
@@ -243,6 +253,8 @@ class ForegroundSensorService : Service(), SensorEventListener {
         alertRunnable?.let { handler.removeCallbacks(it) }
         alertRunnable = null
         alertPending = false
+
+        stopAlertSound()
 
         // Restore normal monitoring notification
         startForegroundServiceInternal()
@@ -288,7 +300,7 @@ class ForegroundSensorService : Service(), SensorEventListener {
         ) == PackageManager.PERMISSION_GRANTED
     }
 
-    private fun sendAlertSms() {
+    private fun sendAlertSms(isTest: Boolean) {
         if (!hasSmsPermission()) {
             Log.w("ALERT", "SMS permission not granted, cannot send alert")
             return
@@ -332,15 +344,21 @@ class ForegroundSensorService : Service(), SensorEventListener {
         }
 
         try {
-            val smsManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                applicationContext.getSystemService(SmsManager::class.java)
-            } else {
-                SmsManager.getDefault()
-            }
+            val smsManager = SmsManager.getDefault()
             smsManager.sendTextMessage(caretakerPhone, null, message, null, null)
-            Log.d("ALERT", "Alert SMS sent to $caretakerPhone")
+            Log.d("ALERT", "Alert SMS sent to $caretakerPhone (isTest=$isTest)")
         } catch (e: Exception) {
             Log.e("ALERT", "Failed to send SMS", e)
+        }
+    }
+
+    private fun stopAlertSound() {
+        try {
+            alertRingtone?.stop()
+        } catch (e: Exception) {
+            Log.w("ALERT", "Failed to stop alert ringtone", e)
+        } finally {
+            alertRingtone = null
         }
     }
 
@@ -425,22 +443,24 @@ class ForegroundSensorService : Service(), SensorEventListener {
 
     private fun showPendingAlertNotification() {
 
-        val cancelIntent = Intent(this, ForegroundSensorService::class.java).apply {
-            action = ACTION_CANCEL_ALERT
+        // Open main activity so user can see countdown and cancel from inside the app
+        val tapIntent = Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            putExtra("EXTRA_PENDING_ALERT", true)
         }
-        val cancelPendingIntent = PendingIntent.getService(
+        val tapPendingIntent = PendingIntent.getActivity(
             this,
             0,
-            cancelIntent,
+            tapIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Possible fall detected")
-            .setContentText("Sending alert in 15 seconds unless cancelled")
+            .setContentText("Alert will be sent in 15 seconds. Open the app to cancel if this is a mistake.")
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setOngoing(true)
-            .addAction(0, "Cancel Alert", cancelPendingIntent)
+            .setContentIntent(tapPendingIntent)
             .build()
 
         val manager = getSystemService(NotificationManager::class.java)

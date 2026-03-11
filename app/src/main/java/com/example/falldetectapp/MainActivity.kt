@@ -158,6 +158,21 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+
+        if (intent == null) return
+
+        setIntent(intent)
+
+        val alertBanner = findViewById<LinearLayout>(R.id.alertBanner)
+        val alertCountdownText = findViewById<TextView>(R.id.alertCountdownText)
+
+        if (intent.getBooleanExtra("EXTRA_PENDING_ALERT", false)) {
+            showAlertBannerWithCountdown(alertBanner, alertCountdownText)
+        }
+    }
+
     private fun hasNotificationPermission(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             ContextCompat.checkSelfPermission(
